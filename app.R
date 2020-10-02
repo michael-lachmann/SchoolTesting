@@ -9,6 +9,7 @@
 
 library(shiny)
 library(magrittr)
+library(ggplot2)
 
 # Define UI for application that draws a histogram
 ui <- fluidPage(
@@ -16,11 +17,11 @@ ui <- fluidPage(
     # Application title
     titlePanel("School testing"),
 
-    # Sidebar with a slider input for number of bins 
+    # Sidebar with a slider input for number of bins
     sidebarLayout(
         sidebarPanel(
-            sliderInput("School.size",
-                        "School.size:",
+            sliderInput("school.size",
+                        "School size:",
                         min = 1,
                         max = 5000,
                         value = 2300),
@@ -37,29 +38,31 @@ ui <- fluidPage(
 
         # Show a plot of the generated distribution
         mainPanel(
-           plotOutput("distPlot"),
-           plotOutput("plot2")
-        )
+                plotOutput("distPlot"),
+                br(),
+                plotOutput("plot2")
+            )
     )
 )
 
 # Define server logic required to draw a histogram
 server <- function(input, output) {
-
-    output$distPlot <- renderPlot({
-        N=input$School.size
+    res.mass = reactive({
+        N=input$school.size
         x=setup.pop()
-        N = 2300
         x$pop["S","N"]=N
+        
         withProgress(message = 'Making plot', value = 0, {
-            
-            res.mass=sapply(1:1000,function(i) {
+            setProgress(0)
+            sapply(1:1000,function(i) {
                 if( i %% 100==0)
-                incProgress(1/10, detail = paste("Running sims", i))
+                    incProgress(1/10, detail = paste("Running sims", i))
                 l=run.pop(N,x,max.T=100,infect.rate = input$inf.rate/1e5,mass.test.every = input$test.freq/2,close.thresh = input$threshold,test.every = 200)
                 c( dim(l$res)[1]*2, N-tail(l$res,1)[,3] )
             })
         } )
+    })
+    output$distPlot <- renderPlot({
                 
         # res.rapid=sapply(1:1000,function(i) {
         #     l=run.pop(N,x,max.T=100,infect.rate = 40/1e5,mass.test.every = 200,close.thresh = 3,test.every = 1)
@@ -72,33 +75,44 @@ server <- function(input, output) {
         # })
         # 
 #        layout(rbind(1,2,3))
-        hist(res.mass[1,],br=seq(0,200,by=20),main="Days till outbreak detected",xlab="days")
-        abline( v=median(res.mass[1,]),col="red" )
+        hist( res.mass()[1,],br=seq(0,200,by=20),main="Days till outbreak detected",xlab="days")
+        abline( v=median(res.mass()[1,]),col="red" )
         #hist(res.rapid[1,],br=seq(0,200,by=20))
         #hist(res.symp[1,],br=seq(0,200,by=20))
+#        qplot(res.mass[1,], geom="histogram")
         
         
     })
     output$plot2 = renderPlot({
-        hist(res.mass[2,],main="Number of students infected by time outbreak detected",xlab="students")
-        abline( v=median(res.mass[2,]),col="red" )
+        hist( res.mass()[2,],main="Number of students infected by time outbreak detected",xlab="students")
+       abline( v=median(res.mass()[2,]),col="red" )
+    #    qplot(res.mass[2,], geom="histogram")
     })
 }
 
 
 
 
-next.gen=function(pop, inf, det, gamma=0.5) {
+next.gen=function(pop, inf, det, gamma=1) {
     #    browser()  
+    gamma=1
     pop1=pop
     n.types = dim(pop)[2]-2
     n.days  = dim(pop)[1]-2
     # Move infected up by a day
-    i = (1:n.days)+1        
-    s = sum( pop * inf) /sum(pop)
-    mov = rbinom(n.days*(n.types+2),pop[i, ],gamma) %>% array(.,dim=dim(pop[i,]))
-    pop[i,  ] = pop[i,  ] - mov
-    pop[i+1,] = pop[i+1,] + mov
+    if( gamma<0.99) {
+        i = (1:n.days)+1        
+        s = sum( pop * inf) /sum(pop)
+        mov = rbinom(n.days*(n.types+2),pop[i, ],gamma) %>% array(.,dim=dim(pop[i,]))
+        pop[i,  ] = pop[i,  ] - mov
+        pop[i+1,] = pop[i+1,] + mov
+    } else { # deterministic
+        i = (1:n.days)+1        
+        s = sum( pop * inf) /sum(pop)
+        mov = pop[i,  ] 
+        pop[i,  ] = 0
+        pop[i+1,] = pop[i+1,] + mov
+    }
     if( sum(pop<0) > 0) {
         print("problem")
 #        browser()
@@ -180,7 +194,7 @@ infect.pop=function(pop, n.infect) {
         if( pop["S","N"] > 0 ) {
             infect.type = grep("^T",colnames(pop)) %>% sample(size=1)
             pop["S","N"] = pop["S","N"]-1
-            pop["I1",init.type] = pop["I1",infect.type]+1
+            pop["I1",infect.type] = pop["I1",infect.type]+1
         }
     }
     pop
@@ -188,7 +202,7 @@ infect.pop=function(pop, n.infect) {
 
 
 run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14, mass.test.fract=0.5, test.every=100, close.thresh=2, symp.thresh=0.5,
-                   par=list(beta=0.28, gamma=1/2)) {
+                   par=list(beta=0.28, gamma=1)) {
     #  browser()
     res=matrix(0,max.T,5)
     n.days=dim(x$pop)[1]-2
