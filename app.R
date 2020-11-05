@@ -49,15 +49,20 @@ ui <- fluidPage(
 server <- function(input, output) {
     res.mass = reactive({
         N=input$school.size
-        x=setup.pop()
+        n.days = 14
+        n.types=20
+        x=setup.pop( n.days= n.days, n.types= n.types )
         x$pop["S","N"]=N
+#        x$pop["S",  ]             =c( 0,rmultinom( 1, N,rep( 1, n.types)), 0)
+      
         
         withProgress(message = 'Making plot', value = 0, {
             setProgress(0)
-            sapply(1:1000,function(i) {
-                if( i %% 100==0)
+            sapply(1:100,function(i) {
+                if( i %% 10==0)
                     incProgress(1/10, detail = paste("Running sims", i))
-                l=run.pop(N,x,max.T=100,infect.rate = input$inf.rate/1e5,mass.test.every = input$test.freq/2,close.thresh = input$threshold,test.every = 200)
+
+                l=run.pop(N,x,max.T=100, infect.rate = input$inf.rate/1e5, mass.test.every = input$test.freq/2, close.thresh = input$threshold,test.every = 200)
                 c( dim(l$res)[1]*2, N-tail(l$res,1)[,3] )
             })
         } )
@@ -129,6 +134,49 @@ next.gen=function(pop, inf, det, gamma=1) {
     pop
 }
 
+
+next.gen.deterministic=function(pop, inf, det) {
+    #    browser()  
+    n.types = dim(pop)[2]-2
+    n.days  = dim(pop)[1]-2
+    # Move infected up by a day
+    s = sum( pop * inf) /sum(pop)
+    # new infections. s is total infection pressure
+    new_e = rbinom(  n.types, pop["S","N"], (1-exp(-s)) )    # how many new infections we have
+    #    browser()
+    new_e = rmultinom(1,new_e, rep(1/(n.types),n.types)) # distribute them among n.types
+    
+    
+        
+    if( gamma<0.99) {
+        i = (1:n.days)+1        
+        s = sum( pop * inf) /sum(pop)
+        mov = rbinom(n.days*(n.types+2),pop[i, ],gamma) %>% array(.,dim=dim(pop[i,]))
+        pop[i,  ] = pop[i,  ] - mov
+        pop[i+1,] = pop[i+1,] + mov
+    } else { # deterministic
+        i = (1:n.days)+1        
+        s = sum( pop * inf) /sum(pop)
+        mov = pop[i,  ] 
+        pop[i,  ] = 0
+        pop[i+1,] = pop[i+1,] + mov
+    }
+    if( sum(pop<0) > 0) {
+        print("problem")
+        #        browser()
+    }
+    # new infections. s is total infection pressure
+    new_e = rbinom(  n.types, pop["S","N"], (1-exp(-s)) )    # how many new infections we have
+    #    browser()
+    new_e = rmultinom(1,new_e, rep(1/(n.types),n.types)) # distribute them among n.types
+    pop["S","N"] = pop["S","N"] - sum(new_e)  # move out of S
+    pop["I1",1+(1:n.types)] = pop["I1",1+(1:n.types)] + new_e  # add to infections on first day - I1
+    
+    # detect
+    
+    pop
+}
+
 test.pop=function( x, det, cutoff, freq, false.pos=0.00) {
     n.days  = dim( x$pop)[1]
     n.types = dim( x$pop)[2]
@@ -160,12 +208,24 @@ n.types = 50
 n.days = 10
 
 
-setup.pop = function( n.days=10, n.type=50, symp.p=0.25 ) {
+# Setup a population. 
+# returns s list, where 
+# pop - current state of population
+#       row - time progression
+#       state of individual - for example, can be different time courses of disease or different locations/rooms etc
+# inf - infectiousness of each type
+# symp  - 1 or 0 depending on whether sumptomatic or not
+# 
+# 
+# input: symp.p - proportion of symptomatic individuals
+
+
+setup.pop = function( n.days=10, n.types=50, symp.p=0.25 ) {
     # rows are progression of disease, columns are types of infection - how viral load increases
     pop= matrix(0,n.days+2,n.types+2)  # days: S, I1...IN, R  x types: N,T1...TM, Q
     dimnames(pop)=list( inf=c("S",paste0("I",1:(n.days)),"R"),type=c("N",paste0("T",1:(n.types)),"Q" ))
     
-    # set us infectiveness of types
+    # set up infectiveness of types
     inf = c(0,0.5,seq(1,0,len= n.days)) # 0 is for S, 0.5 for I1, and then goes down in the remaining n.days-1
     inf = matrix(inf, dim(pop)[1], dim(pop)[2])
     dimnames(inf)=dimnames(pop)
@@ -175,7 +235,7 @@ setup.pop = function( n.days=10, n.type=50, symp.p=0.25 ) {
     # set symptoms
     symp = matrix(0, dim(pop)[1], dim(pop)[2])
     dimnames(symp)=dimnames(pop)
-    symp[5:(n.days+1),(1:(n.type*symp.p))+1]=1   # after I4 symptomatic, 25% of cases are symptomatic
+    symp[5:(n.days+1),(1:(n.types*symp.p))+1]=1   # after I4 symptomatic, 25% of cases are symptomatic
     
     # detection level (viral load)
     det = matrix(0, dim(pop)[1], dim(pop)[2])
@@ -201,7 +261,8 @@ infect.pop=function(pop, n.infect) {
 }
 
 
-run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14, mass.test.fract=0.5, test.every=100, close.thresh=2, symp.thresh=0.5,
+run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14, 
+                   mass.test.fract=0.5, test.every=100, close.thresh=2, symp.thresh=0.5,
                    par=list(beta=0.28, gamma=1)) {
     #  browser()
     res=matrix(0,max.T,5)
@@ -245,6 +306,21 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14, mass.t
     }
     list( x=x, res=res)
 }
+
+
+# 
+# 
+# t.state = matrix( 0, n.types, n.time)
+# 
+# t.state.advance = function( x, s.in) {
+#     n.dim(x)[2]
+#     s.out =x[,n]
+#     
+# }
+# 
+
+
+
 
 # x=setup.pop()
 # N = 2300
