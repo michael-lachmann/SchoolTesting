@@ -50,132 +50,69 @@ server <- function(input, output) {
     res.mass = reactive({
         N=input$school.size
         n.days = 14
-        n.types=20
-        x=setup.pop( n.days= n.days, n.types= n.types )
-        x$pop["S","N"]=N
-#        x$pop["S",  ]             =c( 0,rmultinom( 1, N,rep( 1, n.types)), 0)
+        n.types= 20
+        x= setup.pop( n.days= n.days, n.types= n.types )
+        # Each susceptible individual start in a certain type
+        # Choose N individuals among the n.types
+        x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
       
         
         withProgress(message = 'Making plot', value = 0, {
-            setProgress(0)
-            sapply(1:100,function(i) {
-                if( i %% 10==0)
-                    incProgress(1/10, detail = paste("Running sims", i))
+            setProgress( 0)
+            sapply( 1:200,function(i) {
+                if( i %% 20 == 0)
+                    incProgress( 1/10, detail = paste("Running sims", i))
 
-                l=run.pop(N,x,max.T=100, infect.rate = input$inf.rate/1e5, mass.test.every = input$test.freq/2, close.thresh = input$threshold,test.every = 200)
-                c( dim(l$res)[1]*2, N-tail(l$res,1)[,3] )
+                l=run.pop( N,x,max.T= 100, infect.rate = input$inf.rate/1e5, 
+                           mass.test.every = input$test.freq/2, close.thresh = input$threshold,test.every = 200)
+                c( dim( l$res)[1]*2, N-tail(l$res,1)[,3] )
             })
         } )
     })
     output$distPlot <- renderPlot({
                 
-        # res.rapid=sapply(1:1000,function(i) {
-        #     l=run.pop(N,x,max.T=100,infect.rate = 40/1e5,mass.test.every = 200,close.thresh = 3,test.every = 1)
-        #     c( dim(l$res)[1]*2, N-tail(l$res,1)[,3] )
-        # })
-        # 
-        # res.symp=sapply(1:1000,function(i) {
-        #     l=run.pop(N,x,max.T=100,infect.rate = 40/1e5,mass.test.every = 200,close.thresh = 3,test.every = 200)
-        #     c( dim(l$res)[1]*2, N-tail(l$res,1)[,3] )
-        # })
-        # 
-#        layout(rbind(1,2,3))
         hist( res.mass()[1,],br=seq(0,200,by=20),main="Days till outbreak detected",xlab="days")
         abline( v=median(res.mass()[1,]),col="red" )
-        #hist(res.rapid[1,],br=seq(0,200,by=20))
-        #hist(res.symp[1,],br=seq(0,200,by=20))
-#        qplot(res.mass[1,], geom="histogram")
-        
-        
+
     })
     output$plot2 = renderPlot({
-        hist( res.mass()[2,],main="Number of students infected by time outbreak detected",xlab="students")
-       abline( v=median(res.mass()[2,]),col="red" )
-    #    qplot(res.mass[2,], geom="histogram")
+        hist( res.mass()[ 2,],main="Number of students infected by time outbreak detected",xlab="students")
+       abline( v=median( res.mass()[ 2,]),col="red" )
     })
 }
 
 
 
 
-next.gen=function(pop, inf, det, gamma=1) {
-    #    browser()  
+next.gen=function(pop, inf, det ) {
     gamma=1
     pop1=pop
     n.types = dim(pop)[2]-2
     n.days  = dim(pop)[1]-2
     # Move infected up by a day
-    if( gamma<0.99) {
-        i = (1:n.days)+1        
-        s = sum( pop * inf) /sum(pop)
-        mov = rbinom(n.days*(n.types+2),pop[i, ],gamma) %>% array(.,dim=dim(pop[i,]))
-        pop[i,  ] = pop[i,  ] - mov
-        pop[i+1,] = pop[i+1,] + mov
-    } else { # deterministic
-        i = (1:n.days)+1        
-        s = sum( pop * inf) /sum(pop)
-        mov = pop[i,  ] 
-        pop[i,  ] = 0
-        pop[i+1,] = pop[i+1,] + mov
-    }
-    if( sum(pop<0) > 0) {
+     # deterministic
+    i = ( 1:n.days)+1        
+    s = sum( pop * inf) /sum(pop)
+    mov = pop[i,  ] 
+    pop[i,  ]= 0
+    pop[i+1,]= pop[ i+1, ] + mov
+
+    if( sum( pop < 0) > 0) {
         print("problem")
 #        browser()
     }
     # new infections. s is total infection pressure
-    new_e = rbinom(  n.types, pop["S","N"], (1-exp(-s)) )    # how many new infections we have
-    #    browser()
-    new_e = rmultinom(1,new_e, rep(1/(n.types),n.types)) # distribute them among n.types
-    pop["S","N"] = pop["S","N"] - sum(new_e)  # move out of S
-    pop["I1",1+(1:n.types)] = pop["I1",1+(1:n.types)] + new_e  # add to infections on first day - I1
+    i.S.ntypes=(1:n.types)+1
+    new_e = rbinom(  n.types, pop["S",i.S.ntypes], (1-exp(-s)) )    # how many new infections we have in each type
+
+    pop["S" , i.S.ntypes] = pop["S",  i.S.ntypes]   - new_e  # move out of S
+    pop["I1", i.S.ntypes] = pop["I1", i.S.ntypes] + new_e  # add to infections on first day - I1
     
     # detect
     
     pop
 }
 
-
-next.gen.deterministic=function(pop, inf, det) {
-    #    browser()  
-    n.types = dim(pop)[2]-2
-    n.days  = dim(pop)[1]-2
-    # Move infected up by a day
-    s = sum( pop * inf) /sum(pop)
-    # new infections. s is total infection pressure
-    new_e = rbinom(  n.types, pop["S","N"], (1-exp(-s)) )    # how many new infections we have
-    #    browser()
-    new_e = rmultinom(1,new_e, rep(1/(n.types),n.types)) # distribute them among n.types
-    
-    
-        
-    if( gamma<0.99) {
-        i = (1:n.days)+1        
-        s = sum( pop * inf) /sum(pop)
-        mov = rbinom(n.days*(n.types+2),pop[i, ],gamma) %>% array(.,dim=dim(pop[i,]))
-        pop[i,  ] = pop[i,  ] - mov
-        pop[i+1,] = pop[i+1,] + mov
-    } else { # deterministic
-        i = (1:n.days)+1        
-        s = sum( pop * inf) /sum(pop)
-        mov = pop[i,  ] 
-        pop[i,  ] = 0
-        pop[i+1,] = pop[i+1,] + mov
-    }
-    if( sum(pop<0) > 0) {
-        print("problem")
-        #        browser()
-    }
-    # new infections. s is total infection pressure
-    new_e = rbinom(  n.types, pop["S","N"], (1-exp(-s)) )    # how many new infections we have
-    #    browser()
-    new_e = rmultinom(1,new_e, rep(1/(n.types),n.types)) # distribute them among n.types
-    pop["S","N"] = pop["S","N"] - sum(new_e)  # move out of S
-    pop["I1",1+(1:n.types)] = pop["I1",1+(1:n.types)] + new_e  # add to infections on first day - I1
-    
-    # detect
-    
-    pop
-}
 
 test.pop=function( x, det, cutoff, freq, false.pos=0.00) {
     n.days  = dim( x$pop)[1]
@@ -249,15 +186,25 @@ setup.pop = function( n.days=10, n.types=50, symp.p=0.25 ) {
 }
 
 
-infect.pop=function(pop, n.infect) {
-    for( i in seq_len(n.infect) ) {
-        if( pop["S","N"] > 0 ) {
-            infect.type = grep("^T",colnames(pop)) %>% sample(size=1)
-            pop["S","N"] = pop["S","N"]-1
-            pop["I1",infect.type] = pop["I1",infect.type]+1
-        }
-    }
-    pop
+# infect.pop=function(pop, n.infect) {
+#     for( i in seq_len(n.infect) ) {
+#         if( pop["S","N"] > 0 ) {
+#             infect.type = grep("^T",colnames(pop)) %>% sample(size=1)
+#             pop["S","N"] = pop["S","N"]-1
+#             pop["I1",infect.type] = pop["I1",infect.type]+1
+#         }
+#     }
+#     pop
+# }
+
+infect.pop=function(pop, infect.rate) {
+  n.types = dim(pop)[2]-2
+  n.days  = dim(pop)[1]-2
+  i.S.ntypes=(1:n.types)+1
+  n.infect=rbinom( n.types, pop["S",i.S.ntypes],infect.rate)
+  pop["S",i.S.ntypes]  = pop["S" ,i.S.ntypes]-n.infect
+  pop["I1",i.S.ntypes] = pop["I1",i.S.ntypes]+n.infect
+  pop
 }
 
 
@@ -272,10 +219,9 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
     
     for( t in 1:max.T ) {
         x$t = x$t+1
-        n.infect = rbinom(1,N, infect.rate/(7*par$gamma))
-        x$pop = infect.pop( x$pop, n.infect)
+        x$pop = infect.pop( x$pop, infect.rate)
         
-        x$pop= next.gen( x$pop,x$inf* par$beta, x$det, par$gamma)
+        x$pop= next.gen( x$pop,x$inf* par$beta, x$det )
         
         x = test.pop( x, x$symp, cutoff = symp.thresh, freq=1)
         #    N.quar = x$N.quar
