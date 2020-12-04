@@ -1,17 +1,22 @@
+library(pryr)
 
 
+# Next
 next.gen=function( pop, inf, det, weekend=F ) {
   gamma=1
   pop1=pop
-  n.types = dim(pop)[2]-2
-  n.days  = dim(pop)[1]-2
+  inf.types= colnames(pop) %>% startsWith(prefix="T") %>% which
+  inf.days = rownames(pop) %>% startsWith(prefix="I") %>% which
+  #browser()
+  n.types = length( inf.types )
+  n.days  = length( inf.days )
   # Move infected up by a day
   # deterministic
   i = ( 1:n.days)+1        
   sI = sum( pop * inf) # total infectivity - will effect each student in school
-  mov = pop[ i,  ] 
-  pop[ i  ,  ]= 0
-  pop[ i+1,  ]= pop[ i+1, ] + mov
+  mov = pop[ inf.days,  ] 
+  pop[ inf.days  ,  ]= 0
+  pop[ inf.days+1,  ]= pop[ inf.days+1, ] + mov
   
   if( sum( pop < 0) > 0) {
     print("problem")
@@ -20,11 +25,10 @@ next.gen=function( pop, inf, det, weekend=F ) {
   # new infections within school only on weekdays
   if( ! weekend) {
     # new infections. s is total infection pressure
-    i.S.ntypes=(1:n.types)+1
-    new_e = rbinom(  n.types, pop[ "S", i.S.ntypes], (1-exp( log(1-sI))) )    # how many new infections we have in each type, among Sus. 
+    new_e = rbinom(  n.types, pop[ "S", inf.types], (1-exp( log(1-sI))) )    # how many new infections we have in each type, among Sus. 
     
-    pop[ "S" , i.S.ntypes] = pop["S",  i.S.ntypes] - new_e  # move out of S
-    pop[ "I1", i.S.ntypes] = pop["I1", i.S.ntypes] + new_e  # add to infections on first day - I1
+    pop[ "S" , inf.types] = pop["S",  inf.types] - new_e  # move out of S
+    pop[ "I1", inf.types] = pop["I1", inf.types] + new_e  # add to infections on first day - I1
   }    
   # detect
   
@@ -79,11 +83,16 @@ setup.pop = function( n.days=10, n.types=50, symp.p=0.25 ) {
   # rows are progression of disease, columns are types of infection - how viral load increases
   pop= matrix(0,n.days+2,n.types+2)  # days: S, I1...IN, R  x types: N,T1...TM, Q
   dimnames(pop)=list( inf=c("S",paste0("I",1:(n.days)),"R"),type=c("N",paste0("T",1:(n.types)),"Q" ))
+
+  inf.types= colnames(pop) %>% startsWith(prefix="T") %>% which
+  inf.days = rownames(pop) %>% startsWith(prefix="I") %>% which
+
   
   # set up infectiveness of types - from Larremore
+  inf.decline.t=n.days-5
   inf.v = rep(0,dim(pop)[1])
   inf.v[1+4     ] = 0.6   # I4 is first infectious at 60%
-  inf.v[1+(5:12)] = seq(1,0,len=8) # I5 to I11 declining infectiousness
+  inf.v[5+(1:inf.decline.t)] = seq(1,0,len=inf.decline.t) # I5 to I11 declining infectiousness
   
   inf = matrix(inf.v, dim(pop)[1], dim(pop)[2])
   dimnames(inf)=dimnames(pop)
@@ -97,13 +106,14 @@ setup.pop = function( n.days=10, n.types=50, symp.p=0.25 ) {
   
   # detection level (viral load)
   det = matrix(0, dim(pop)[1], dim(pop)[2])
-  det[(1:n.days)+1,(1:n.types)] = sapply( 1:n.types, function(i) {viral.load( n.days, rgamma(1,1.8)+0.2 , runif(1,7,11)   )}  )
+  det[ inf.days, inf.types] = sapply( 1:n.types, function(i) {viral.load( n.days, rgamma(1,1.8)+0.2 , runif(1,7,11)   )}  )
   dimnames(det) = dimnames(pop)
   det[    ,"Q"] = 0  # viral load of quarantined is 0
   det[ "S",   ] = 0  # susceptible
   det[ "R",   ] = 0  # recovered
-  
-  list( pop=pop, det=det, inf=inf, symp=symp )
+#  as.environment( 
+    list( pop=pop, det=det, inf=inf, symp=symp ) 
+#  )
 }
 
 
@@ -129,8 +139,9 @@ infect.pop=function(pop, infect.rate) {
 }
 
 
+
 run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14, 
-                   mass.test.fract=0.5, test.every=100, close.thresh=2, symp.thresh=0.5, use.weekend = T,
+                   mass.test.fract=1, test.every=100, close.thresh=2, symp.thresh=0.5, use.weekend = T,
                    par=list(beta=0.)) {
   res     =matrix( 0, max.T, 5 ) # record results
   n.days  =dim(x$pop)[1]-2
@@ -138,15 +149,17 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
   
   
   for( t in 1:max.T ) {
+    if( length(x$t)==0) x$t=0
+
     x$t = x$t+1
     
     # Infections from outside happen every day
-    x$pop = infect.pop( x$pop, infect.rate)
+    x$pop[] = infect.pop( x$pop, infect.rate)
     
     # Move infection forward and infect within school
     
     # Check if it is a weekend
-    if( use.weekend & (t %% 7 < 5) )  # days 5 and 6 are weekend
+    if( use.weekend & (x$t %% 7 < 5) )  # days 5 and 6 are weekend
       weekend = T
     else
       weekend = F
@@ -158,8 +171,8 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
     #    N.quar = x$N.quar
     N.quar = sum( x$pop[(1:n.days)+1,"Q"])
     
-    
-    if( t %% mass.test.every==0) {
+    # Mass testing with PCR
+    if( x$t %% mass.test.every==0) {
       x = test.pop( x, det = x$det, cutoff = 3, freq = 1/mass.test.fract)
       N.quar = N.quar + x$N.quar 
     }
@@ -174,21 +187,22 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
     }
     
     m=n.types+2
-    x = test.pop( x, x$det, cutoff = 5, freq = test.every)
-    res[t,] = c(sum( x$pop[ (1:n.days)+1, (1:n.types)+1 ] ), 
-                sum( x$pop[ (1:n.days)+1, "Q"           ] ),
-                sum( x$pop[ "S"         , -m            ] ),
-                sum( x$pop[             , "Q"           ] ),
-                sum( x$pop[ "R"         , -m            ] )
+    # individual testing with antigen
+  #  x = test.pop( x, x$det, cutoff = 5, freq = test.every)
+    res[t,] = c(sum( x$pop[ (1:n.days)+1, (1:n.types)+1 ] ), # still infected
+                sum( x$pop[ (1:n.days)+1, "Q"           ] ), # in quaran
+                sum( x$pop[ "S"         , -m            ] ), # sus
+                sum( x$pop[             , "Q"           ] ), # all quaran
+                sum( x$pop[ "R"         , -m            ] )  # recovered
     )
   }
+  colnames(res)=c("Inf","in.Q","Sus","all.Q","Rec")
   list( x=x, res=res)
 }
 
 
 
 check.R0 = function( N, R0, n.days=18, n.type=20) {
-  #browser()
   x= setup.pop( n.days= n.days, n.types= n.types )
   # Each susceptible individual start in a certain type
   # Choose N individuals among the n.types
@@ -201,7 +215,7 @@ check.R0 = function( N, R0, n.days=18, n.type=20) {
   p = x$pop
   
   p["I1","T1"] = 1
-  res = sapply(seq_len(1000)), function(j) {
+  res = sapply(seq_len(1000), function(j) {
   for( i in 1:n.days) {
     p = next.gen( p, x$inf* beta, x$det, weekend = F )
     p["I1","Q"] = sum(p["I1",1+(1:n.type)])

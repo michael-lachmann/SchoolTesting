@@ -66,6 +66,8 @@ server <- function(input, output) {
         total.inf = N * sum.inf      # interaction with all kids in school
       
         
+        ###### NEED TO INITIALIZE SCHOOL FOR EACH RUN
+        
         withProgress(message = 'Making plot', value = 0, {
             setProgress( 0)
             sapply( 1:200,function(i) {
