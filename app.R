@@ -115,7 +115,7 @@ server <- function(input, output,clientData, session) {
           res=sum( input$test.freq, input$R0, input$inf.rate)
             res=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
                          .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress"),
-                         .packages = c("magrittr"),
+                         .packages = c("magrittr","roperators"),
                          .inorder=F
                         ) %dopar% {
               isolate({

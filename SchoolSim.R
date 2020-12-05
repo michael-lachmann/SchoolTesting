@@ -1,5 +1,5 @@
 library(pryr)
-
+library(roperators)
 
 # Next
 next.gen=function( x, weekend=F ) {
@@ -25,8 +25,10 @@ next.gen=function( x, weekend=F ) {
     # new infections. s is total infection pressure
     new_e = rbinom(  n.types, x$pop[ "S", x$inf.types], (1-exp( log(1-sI))) )    # how many new infections we have in each type, among Sus. 
     
-    x$pop[ "S" , x$inf.types] = x$pop["S",  x$inf.types] - new_e  # move out of S
-    x$pop[ "I1", x$inf.types] = x$pop["I1", x$inf.types] + new_e  # add to infections on first day - I1
+#    x$pop[ "S" , x$inf.types] = x$pop["S",  x$inf.types] - new_e  # move out of S
+#    x$pop[ "I1", x$inf.types] = x$pop["I1", x$inf.types] + new_e  # add to infections on first day - I1
+     x$pop[ "S" , x$inf.types] %-=% new_e  # move out of S
+     x$pop[ "I1", x$inf.types] %+=% new_e  # add to infections on first day - I1
   }    
   # detect
   
@@ -40,11 +42,11 @@ test.pop=function( x, det, cutoff, freq, false.pos=0.00) {
   i = cutoff < det
   quar = x$pop * 0 # empty copy of x$pop
   quar[i] = rbinom( length( x$pop[i]), x$pop[i], 1/freq) 
-  x$pop[i] = x$pop[i] - quar[i] ;
-  x$pop[, "Q"] = x$pop[, "Q"] + rowSums(quar)  # put in quarantine
+  x$pop[i] %-=%  quar[i] ;
+  x$pop[, "Q"] %+=%  rowSums(quar)  # put in quarantine
   x$N.quar = sum(quar)
   quar = rbinom( 1, x$pop["S","N"], false.pos)
-  x$pop["S","Q"] = x$pop["S","Q"]+quar
+  x$pop["S","Q"] %+=% quar
   x
 }
 
@@ -130,8 +132,8 @@ infect.pop=function(x, infect.rate) {
   n.types = length(x$inf.types)
   n.days  = length(x$inf.days)
   n.infect=rbinom( n.types, x$pop[ "S" , x$inf.types], infect.rate)
-  x$pop[ "S" , x$inf.types] = x$pop[ "S" , x$inf.types] -n.infect
-  x$pop[ "I1", x$inf.types] = x$pop[ "I1", x$inf.types] +n.infect
+  x$pop[ "S" , x$inf.types] %-=%  n.infect
+  x$pop[ "I1", x$inf.types] %+=%  n.infect
   x$pop
 }
 
