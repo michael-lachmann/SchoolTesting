@@ -2,37 +2,35 @@ library(pryr)
 
 
 # Next
-next.gen=function( pop, inf, det, weekend=F ) {
+next.gen=function( x, weekend=F ) {
   gamma=1
-  pop1=pop
-  inf.types= colnames(pop) %>% startsWith(prefix="T") %>% which
-  inf.days = rownames(pop) %>% startsWith(prefix="I") %>% which
+  pop1=x$pop
   #browser()
-  n.types = length( inf.types )
-  n.days  = length( inf.days )
+  n.types = length( x$inf.types )
+  n.days  = length( x$inf.days )
   # Move infected up by a day
   # deterministic
   i = ( 1:n.days)+1        
-  sI = sum( pop * inf) # total infectivity - will effect each student in school
-  mov = pop[ inf.days,  ] 
-  pop[ inf.days  ,  ]= 0
-  pop[ inf.days+1,  ]= pop[ inf.days+1, ] + mov
+  sI = sum( x$pop * x$inf) # total infectivity - will effect each student in school
+  mov = x$pop[ x$inf.days,  ] 
+  x$pop[ x$inf.days  ,  ]= 0
+  x$pop[ x$inf.days+1,  ]= x$pop[ x$inf.days+1, ] + mov
   
-  if( sum( pop < 0) > 0) {
+  if( sum( x$pop < 0) > 0) {
     print("problem")
     #        browser()
   }
   # new infections within school only on weekdays
   if( ! weekend) {
     # new infections. s is total infection pressure
-    new_e = rbinom(  n.types, pop[ "S", inf.types], (1-exp( log(1-sI))) )    # how many new infections we have in each type, among Sus. 
+    new_e = rbinom(  n.types, x$pop[ "S", x$inf.types], (1-exp( log(1-sI))) )    # how many new infections we have in each type, among Sus. 
     
-    pop[ "S" , inf.types] = pop["S",  inf.types] - new_e  # move out of S
-    pop[ "I1", inf.types] = pop["I1", inf.types] + new_e  # add to infections on first day - I1
+    x$pop[ "S" , x$inf.types] = x$pop["S",  x$inf.types] - new_e  # move out of S
+    x$pop[ "I1", x$inf.types] = x$pop["I1", x$inf.types] + new_e  # add to infections on first day - I1
   }    
   # detect
   
-  pop
+  x$pop
 }
 
 
@@ -112,7 +110,7 @@ setup.pop = function( n.days=10, n.types=50, symp.p=0.25 ) {
   det[ "S",   ] = 0  # susceptible
   det[ "R",   ] = 0  # recovered
 #  as.environment( 
-    list( pop=pop, det=det, inf=inf, symp=symp ) 
+    list( pop=pop, det=det, inf=inf, symp=symp, inf.types=inf.types, inf.days=inf.days ) 
 #  )
 }
 
@@ -128,14 +126,13 @@ setup.pop = function( n.days=10, n.types=50, symp.p=0.25 ) {
 #     pop
 # }
 
-infect.pop=function(pop, infect.rate) {
-  n.types = dim(pop)[2]-2
-  n.days  = dim(pop)[1]-2
-  i.S.ntypes= 1+(1:n.types)
-  n.infect=rbinom( n.types, pop[ "S" , i.S.ntypes], infect.rate)
-  pop[ "S" , i.S.ntypes] = pop[ "S" , i.S.ntypes] -n.infect
-  pop[ "I1", i.S.ntypes] = pop[ "I1", i.S.ntypes] +n.infect
-  pop
+infect.pop=function(x, infect.rate) {
+  n.types = length(x$inf.types)
+  n.days  = length(x$inf.days)
+  n.infect=rbinom( n.types, x$pop[ "S" , x$inf.types], infect.rate)
+  x$pop[ "S" , x$inf.types] = x$pop[ "S" , x$inf.types] -n.infect
+  x$pop[ "I1", x$inf.types] = x$pop[ "I1", x$inf.types] +n.infect
+  x$pop
 }
 
 
@@ -144,9 +141,9 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
                    mass.test.fract=1, test.every=100, close.thresh=2, symp.thresh=0.5, use.weekend = T,
                    par=list(beta=0.)) {
   res     =matrix( 0, max.T, 5 ) # record results
-  n.days  =dim(x$pop)[1]-2
-  n.types =dim(x$pop)[2]-2
-  
+  n.days  = length(x$inf.days)
+  n.types = length(x$inf.types)
+  x$inf = x$inf * par$beta
   
   for( t in 1:max.T ) {
     if( length(x$t)==0) x$t=0
@@ -154,7 +151,7 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
     x$t = x$t+1
     
     # Infections from outside happen every day
-    x$pop[] = infect.pop( x$pop, infect.rate)
+    x$pop[] = infect.pop( x, infect.rate)
     
     # Move infection forward and infect within school
     
@@ -164,7 +161,7 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
     else
       weekend = F
     
-    x$pop = next.gen( x$pop, x$inf* par$beta, x$det, weekend = weekend )
+    x$pop = next.gen( x, weekend = weekend )
     
     
     x = test.pop( x, x$symp, cutoff = symp.thresh, freq=1)
@@ -177,8 +174,8 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
       N.quar = N.quar + x$N.quar 
     }
     if( N.quar >= close.thresh) {
-      res[t,] = c(sum( x$pop[ (1:n.days)+1, (1:n.types)+1 ] ), 
-                  sum( x$pop[ (1:n.days)+1, "Q"]),
+      res[t,] = c(sum( x$pop[ x$inf.days, x$inf.types ] ), 
+                  sum( x$pop[ x$inf.days, "Q"]),
                   sum( x$pop[ "S"         , -m]),
                   sum( x$pop[             , "Q"]),
                   sum( x$pop[ "R"         , -m]))
@@ -189,8 +186,8 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
     m=n.types+2
     # individual testing with antigen
   #  x = test.pop( x, x$det, cutoff = 5, freq = test.every)
-    res[t,] = c(sum( x$pop[ (1:n.days)+1, (1:n.types)+1 ] ), # still infected
-                sum( x$pop[ (1:n.days)+1, "Q"           ] ), # in quaran
+    res[t,] = c(sum( x$pop[ x$inf.days, x$inf.types ] ), # still infected
+                sum( x$pop[ x$inf.days, "Q"           ] ), # in quaran
                 sum( x$pop[ "S"         , -m            ] ), # sus
                 sum( x$pop[             , "Q"           ] ), # all quaran
                 sum( x$pop[ "R"         , -m            ] )  # recovered
@@ -215,13 +212,14 @@ check.R0 = function( N, R0, n.days=18, n.type=20) {
   p = x$pop
   
   p["I1","T1"] = 1
+  x$inf = x$inf * par$beta
   res = sapply(seq_len(1000), function(j) {
   for( i in 1:n.days) {
-    p = next.gen( p, x$inf* beta, x$det, weekend = F )
-    p["I1","Q"] = sum(p["I1",1+(1:n.type)])
-    p["I1",1+(1:n.type)] = 0
+    x$pop = next.gen( x, weekend = F )
+    x$pop["I1","Q"] = sum(x$pop["I1", x$inf.types])
+    x$pop["I1", x$inf.types] = 0
   }
-  sum(p[,"Q"])
+  sum(x$pop[,"Q"])
   } )
   mean(res)
 }
