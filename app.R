@@ -10,6 +10,10 @@
 library(shiny)
 library(magrittr)
 library(ggplot2)
+library(gridExtra)
+library(dplyr)
+library(reshape)
+
 
 library(doParallel)
 library(parallel)
@@ -33,8 +37,10 @@ makeCluster.conditional=function( cl, no_cores = detectCores(logical = TRUE)-1) 
 }
 
 #cl = makeCluster.conditional( cl)
+if( F ) {
 cl = makeCluster(3)
 registerDoParallel(cl)
+}
 
 print("done")
 
@@ -54,49 +60,54 @@ ui <- fluidPage(
                         value = 2300),
             sliderInput("inf.rate",
                         "Infection import rate per 100k:",
-                        min=1, max=400,value=40),
-            sliderInput("threshold",
-                        "Outbreak threshold:",
-                        min=1, max=10, value=3),
+                        min=1, max=400,value=100),
+            sliderInput("duration",
+                        "Number of days (including weekend):",
+                        min=1, max=150, value=90),
             sliderInput("test.freq",
                         "Test frequency:",
-                        min=2, max=30,value=14),
-            sliderInput("R0",
-                        "R0:",
-                        min=0, max=5,value=1.6,step=0.1),
-            radioButtons("country",label="R0 by country",
+                        min=2, max=90,value=30),
+            # sliderInput("R0",
+            #             "R0:",
+            #             min=0, max=5,value=1.6,step=0.1),
+            radioButtons("test.cutoff",label="Test type",inline=T,
+                          choices=c(
+                            "PCR"=3,
+                            "Pooled PCR"=4,
+                            "Antigen"=5
+                                    )),
+            radioButtons("symp.p",label="Symptomatic freq",inline=T,selected="0.3",
                          choices=c(
-                           "South Korea 0.03"=0.03,
-                           "Germany 0.6"=0.6,
-                           "Israel 4.0"=4.0,
-                           "Self chosen"=NA
-                                   ))
+                           "Lower (10%)"=0.1,
+                           "Middle (30%)"=0.3,
+                           "High & Adult (50%)"=0.5
+                         ))
         ),
 
         # Show a plot of the generated distribution
         mainPanel(
-                plotOutput("distPlot"),
-                br(),
+#                plotOutput("distPlot"),
+#                br(),
                 plotOutput("plot2")
             )
     )
 )
 
+
+input=list(test.freq=30, threshold=100, R0=1.5, inf.rate=2/2500*1e5/14, duration=90, school.size=200)
+
 # Define server logic required to draw a histogram
 server <- function(input, output,clientData, session) {
     print("here")
-    onStop(function() {cat("Session stopped\n");stopCluster(cl)})
+if(F){    onStop(function() {cat("Session stopped\n");stopCluster(cl)})}
     observe( {
       updateTextInput(session, "R0", NULL, as.numeric(input$country))
     })
     res.mass = reactive({
         N=input$school.size
         n.days = 18
-        n.types= 20
-        x= setup.pop( n.days= n.days, n.types= n.types )
-        # Each susceptible individual start in a certain type
-        # Choose N individuals among the n.types
-        x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
+        n.types= 10
+        x= setup.pop( n.days= n.days, n.types= n.types,symp.p = as.numeric(input$symp.p) )
         # How many infections will single individual produce?
         sum.inf = sum( x$inf[,"T1"]) # infection factor over days
         total.inf = N * sum.inf      # interaction with all kids in school
@@ -111,39 +122,102 @@ server <- function(input, output,clientData, session) {
 #          registerDoParallel(clM)
 
           tt=Sys.time()
-          N.runs=500
-          res=sum( input$test.freq, input$R0, input$inf.rate)
-            res=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
-                         .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress"),
-                         .packages = c("magrittr","roperators"),
-                         .inorder=F
-                        ) %dopar% {
-              isolate({
-#                if( i %% round(N.runs/20) == 0)
-#                    incProgress( 1/20, detail = paste("Running sims", i))
-
-                l=run.pop( N,x,max.T= 100, infect.rate = input$inf.rate/1e5, 
-                           mass.test.every = input$test.freq, close.thresh = input$threshold,test.every = 200,
-                           par=list(beta = input$R0/ total.inf) # actual number is R0 divided by expected number of infections.
-                           )
-                c( dim( l$res)[1]*2, N-tail(l$res,1)[,3] )
-              })
-            }
+          N.runs=50
+          res=sum( input$test.freq,  input$inf.rate, input$duration, as.numeric(input$test.cutoff)) # This is just so things recalculate
+          res1=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
+                       .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress"),
+                       .packages = c("magrittr","roperators"),
+                       .inorder=F
+                      ) %do% {
+            isolate({
+              x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
+              l=run.pop( N,x,max.T= input$duration, infect.rate = input$inf.rate/1e5, test.cutoff=as.numeric(input$test.cutoff),
+                         mass.test.every = input$test.freq, test.every = 200,
+                         par=list(beta = 0.6/ total.inf) # actual number is R0 divided by expected number of infections.
+                         )
+              c( N=dim( l$res)[1]*2, Infect=N-tail(l$res,1)[,c("Sus")]-tail(l$res,1)[,c("Imp")], Imp=tail(l$res,1)[,c("Imp")] )
+            })
+          }
+          
+          res2=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
+                       .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress"),
+                       .packages = c("magrittr","roperators"),
+                       .inorder=F
+          ) %do% {
+            isolate({
+              x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
+              l=run.pop( N,x,max.T= input$duration, infect.rate = input$inf.rate/1e5, test.cutoff=as.numeric(input$test.cutoff),
+                         mass.test.every = input$test.freq, test.every = 200,
+                         par=list(beta = 1.6/ total.inf) # actual number is R0 divided by expected number of infections.
+              )
+              c( N=dim( l$res)[1]*2, Infect=N-tail(l$res,1)[,c("Sus")]-tail(l$res,1)[,c("Imp")], Imp=tail(l$res,1)[,c("Imp")] )
+            })
+          }
+          
+          res3=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
+                       .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress"),
+                       .packages = c("magrittr","roperators"),
+                       .inorder=F
+          ) %do% {
+            isolate({
+              x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
+              l=run.pop( N,x,max.T= input$duration, infect.rate = input$inf.rate/1e5, test.cutoff=as.numeric(input$test.cutoff),
+                         mass.test.every = input$test.freq, test.every = 200,
+                         par=list(beta = 4/ total.inf) # actual number is R0 divided by expected number of infections.
+              )
+              c( N=dim( l$res)[1]*2, Infect=N-tail(l$res,1)[,c("Sus")]-tail(l$res,1)[,c("Imp")], Imp=tail(l$res,1)[,c("Imp")] )
+            })
+          }
+          
  #           stopCluster(clM)
-            res=Reduce(cbind,res)
+            res1=Reduce(rbind,res1) %>% as.data.frame
+            res2=Reduce(rbind,res2) %>% as.data.frame
+            res3=Reduce(rbind,res3) %>% as.data.frame
             print(Sys.time()-tt)
-            res
+            list( lo=res1,med=res2,hi=res3)
         } )
     })
     output$distPlot <- renderPlot({
-                
-        hist( res.mass()[1,],br=seq(0,200,by=20),main="Days till outbreak detected",xlab="days")
-        abline( v=median(res.mass()[1,]),col="red" )
 
     })
-    output$plot2 = renderPlot({
-        hist( res.mass()[ 2,],main="Number of students infected by time outbreak detected",xlab="students")
-       abline( v=median( res.mass()[ 2,]),col="red" )
+    output$plot2 = renderPlot( height=1024,width=1024,res=150,{
+      res=res.mass()
+      df.lo = melt(res$lo)
+      df.med = melt(res$med)
+      df.hi = melt(res$hi)
+      x.lo= df.lo %>% filter(variable=="Infect" | variable=="Imp")
+      x.med = df.med %>% filter(variable=="Infect" | variable=="Imp")
+      x.hi = df.hi %>% filter(variable=="Infect" | variable=="Imp")
+      
+      x.max=max( x.lo$value, x.med$value, x.hi$value )
+      
+      bin = min( floor(x.max/10)+1, 5)
+      
+      g.lo = ggplot( df.lo %>% filter(variable=="Infect" | variable=="Imp"), aes(x=value,fill=variable)) + 
+        labs( title= "Frequency of number infected, low spread")+
+        ylab("Percentage of schools") +
+        xlab("number infected") +
+        coord_cartesian( xlim=c(0,x.max) ) +
+        scale_fill_discrete(labels=c("Transmission in school","Imported infections")) +
+        geom_histogram( aes(y=bin*..density..*100),binwidth=bin,position = "identity",alpha=0.5)+
+        labs(fill = "Type of transmission")
+      g.med = ggplot( df.med %>% filter(variable=="Infect" | variable=="Imp"), aes(x=value,fill=variable)) + 
+        labs( title= "Frequency of number infected, medium spread")+
+        xlab("number infected") +
+        ylab("Percentage of schools") +
+        coord_cartesian( xlim=c(0,x.max) ) +
+        scale_fill_discrete(labels=c("Transmission in school","Imported infections")) +
+        geom_histogram( aes(y=bin*..density..*100),binwidth=bin,position = "identity",alpha=0.5) +
+        labs(fill = "Type of transmission")
+      g.hi = ggplot( df.hi %>% filter(variable=="Infect" | variable=="Imp"), aes(x=value,fill=variable)) + 
+        labs( title= "Frequency of number infected, high spread")+
+        xlab("number infected") +
+        ylab("Percentage of schools") +
+        coord_cartesian( xlim=c(0,x.max) ) +
+        scale_fill_discrete(labels=c("Transmission in school","Imported infections")) +
+        geom_histogram( aes(y=bin*..density..*100),binwidth=bin,position = "identity",alpha=0.5) +
+        labs(fill = "Type of transmission")
+      grid.arrange(g.lo,g.med,g.hi,nrow=3)
     })
 }
 
