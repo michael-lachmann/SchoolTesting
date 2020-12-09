@@ -17,6 +17,7 @@ library(reshape)
 
 library(doParallel)
 library(parallel)
+library(abind)
 
 source("SchoolSim.R")
 
