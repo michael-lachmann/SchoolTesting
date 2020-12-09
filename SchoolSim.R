@@ -90,9 +90,9 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
     
     # Check if it is a weekend
     if( use.weekend & (x$t %% 7 < 5) )  # days 5 and 6 are weekend
-      weekend = T
-    else
       weekend = F
+    else
+      weekend = T
     
     x = infect.pop( x, infect.rate )
     x$N.import %+=% x$new.infect
@@ -180,7 +180,8 @@ setup.pop = function( n.days=10, n.types=50, symp.p=0.25 ) {
   # set up infectiveness of types - from Larremore
   inf.decline.t=n.days-5
   inf.v = rep(0,dim(pop)[1])
-  inf.v[1+4     ] = 0.6   # I4 is first infectious at 60%
+  inf.v[1+3     ] = 0.6   # I4 is first infectious at 60%
+  inf.v[1+4     ] = 1
   inf.v[5+(1:inf.decline.t)] = seq(1,0,len=inf.decline.t) # I5 to I11 declining infectiousness
   
   inf = matrix(inf.v, dim(pop)[1], dim(pop)[2])
@@ -219,21 +220,22 @@ check.R0 = function( N, R0, n.days=18, n.type=20) {
   # Choose N individuals among the n.types
   x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
   # How many infections will single individual produce?
-  sum.inf = sum( x$inf[,"T1"]) # infection factor over days
+  sum.inf = mean(colSums(x$inf[,x$inf.types])) # infection factor over days
   total.inf = N * sum.inf      # interaction with all kids in school
   beta = R0/ total.inf
   
-  p = x$pop
+  pop0=x$pop
   
-  p["I1","T1"] = 1
-  x$inf = x$inf * par$beta
+  x$inf = x$inf * beta
   res = sapply(seq_len(1000), function(j) {
+    x$pop= pop0
+    x$pop["I1","T1"]=1
   for( i in 1:n.days) {
-    x$pop = next.gen( x, weekend = F )
-    x$pop["I1","Q"] = sum(x$pop["I1", x$inf.types])
-    x$pop["I1", x$inf.types] = 0
+    x$pop = next.gen( x, do.infect = T )
+#    x$pop["I1","Q"] = sum(x$pop["I1", x$inf.types])
+#    x$pop["I1", x$inf.types] = 0
   }
-  sum(x$pop[,"Q"])
+  N-sum(x$pop["S",])-1
   } )
   mean(res)
 }
