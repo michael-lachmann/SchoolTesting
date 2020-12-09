@@ -102,6 +102,7 @@ server <- function(input, output,clientData, session) {
     res.mass = reactive({
         n.days = 18
         n.types= 10
+        N=input$school.size
         x= setup.pop( n.days= n.days, n.types= n.types,symp.p = as.numeric(input$symp.p) )
         # How many infections will single individual produce?
         sum.inf = mean(colSums(x$inf[,x$inf.types])) # infection factor over days
