@@ -240,20 +240,25 @@ server <- function(input, output,clientData, session) {
       layout(cbind(1:2,3:4))
       plot(test.freqs,res[,"hi","Infect"]/res[,"hi","Imp"],type="l",ylab="In school infections per imported case",xlab="days between tests",log="x",xaxt="n")
       axis(1,test.freqs)
-      lines(test.freqs,res[,"lo","Infect"]/res[,"hi","Imp"])
-      lines(test.freqs,res[,"med","Infect"]/res[,"hi","Imp"])
+      lines(test.freqs,res[,"lo","Infect"]/res[,"lo","Imp"],col=2)
+      lines(test.freqs,res[,"med","Infect"]/res[,"med","Imp"],col=3)
+      legend("topleft",legend = c("Israel R0=4","Ireland R0=1.6","Germany R0=0.5"),lty=1,col=c(1,3,2))
+      
       plot(test.freqs,res[,"hi","Q"]/(res[,"hi","Infect"]+res[,"hi","Imp"])*100,type="l",ylab="Percent cases caught",xlab="days between tests",xaxt="n",log="x",ylim=c(0,100))
       axis(1,test.freqs)
-      lines(test.freqs,res[,"lo","Q"]/(res[,"hi","Infect"]+res[,"hi","Imp"])*100)
-      lines(test.freqs,res[,"med","Q"]/(res[,"hi","Infect"]+res[,"hi","Imp"])*100)
+      lines(test.freqs,res[,"lo","Q"]/(res[,"lo","Infect"]+res[,"lo","Imp"])*100,col=2)
+      lines(test.freqs,res[,"med","Q"]/(res[,"med","Infect"]+res[,"med","Imp"])*100,col=3)
+      
+      
       plot(test.freqs,res[,"hi","MaxI"],type="l",ylab="Maximal infected at once",xlab="days between tests",xaxt="n",log="x")
       axis(1,test.freqs)
-      lines(test.freqs,res[,"lo","MaxI"])
-      lines(test.freqs,res[,"med","MaxI"])
+      lines(test.freqs,res[,"lo","MaxI"],col=2)
+      lines(test.freqs,res[,"med","MaxI"],col=3)
+      
       plot(test.freqs,(res[,"hi","Infect"]+res[,"hi","Imp"])/res[,"hi","N"]*100,type="l",ylab="Percent infected",xlab="days between tests",xaxt="n",log="x",ylim=c(0,100))
       axis(1,test.freqs)
-      lines(test.freqs,(res[,"med","Infect"]+res[,"med","Imp"])/res[,"med","N"]*100,type="l")
-      lines(test.freqs,(res[,"lo","Infect"]+res[,"lo","Imp"])/res[,"lo","N"]*100,type="l")
+      lines(test.freqs,(res[,"lo","Infect"]+res[,"lo","Imp"])/res[,"lo","N"]*100,type="l",col=2)
+      lines(test.freqs,(res[,"med","Infect"]+res[,"med","Imp"])/res[,"med","N"]*100,type="l",col=3)
     })
 }
 
