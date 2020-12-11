@@ -57,6 +57,7 @@ ui <- fluidPage(
         sidebarPanel(
           sliderTextInput("school.size","School size:", 
                   choices = c(25,50,100,500,2000,5000), 
+                  selected = 2000,
                   animate = FALSE, grid = T, 
                   hide_min_max = FALSE, from_fixed = FALSE,
                   to_fixed = FALSE, from_min = NULL, from_max = NULL, to_min = NULL,
@@ -108,7 +109,8 @@ ui <- fluidPage(
 if( file.exists("res_list.Rda") & ( max(file.mtime("SchoolSim.R"),file.mtime("app.R"))<file.mtime("res_list.Rda") )  ) {load("res_list.Rda")} else {
 res.list=list()
 }
-input=list(school.size=2000,test.freq=30, threshold=100, R0=1.5, inf.rate=20/2500*1e5/14, duration=90, school.size=200,symp.p=0.3)
+input=list(school.size=2000,test.freq=30, threshold=100, R0=1.5, inf.rate=20/2500*1e5/14, duration=90, school.size=200,symp.p=0.3,
+           test.cutoff=3)
 
 # Define server logic required to draw a histogram
 server <- function(input, output,clientData, session) {
@@ -123,6 +125,7 @@ server <- function(input, output,clientData, session) {
         total.inf = N * sum.inf      # interaction with all kids in school
       
         test.freqs=c(2,3,7,14,30,90)
+        R0s = c(0.6,1.6,4)
         
         duration=90
         
@@ -133,23 +136,24 @@ server <- function(input, output,clientData, session) {
 #          clM<<-makeCluster(7)  
 #          print("register")
 #          registerDoParallel(clM)
-        par.s=paste( input$school.size, input$test.cutoff, input$inf.rate)
+        par.s=paste( input$school.size, input$test.cutoff, input$inf.rate,input$symp.p)
+#        if(T) {
         if( !(par.s %in% names(res.list)) ) {
         res=lapply( test.freqs, function(test.freq) {
           tt=Sys.time()
-          N.runs=100
-          res=sum( input$test.freq,  input$inf.rate, duration, as.numeric(input$test.cutoff)) # This is just so things recalculate
+          N.runs=30
+          res=sum( input$test.freq,  input$inf.rate, duration, as.numeric(input$test.cutoff), as.numeric(input$symp.p)) # This is just so things recalculate
           res1=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
                        .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress","N",
                                    "n.types","x","duration","total.inf"),
                        .packages = c("magrittr","roperators"),
                        .inorder=F
                       ) %do% {
-            #isolate({
+            isolate({
               x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
               l=run.pop( N,x,max.T= duration, infect.rate = input$inf.rate/1e5, test.cutoff=as.numeric(input$test.cutoff),
                          mass.test.every = test.freq, test.every = 200,
-                         par=list(beta = 0.6/ total.inf) # actual number is R0 divided by expected number of infections.
+                         par=list(beta = R0s[1]/ total.inf) # actual number is R0 divided by expected number of infections.
                          )
               c( N=N, 
                  Infect=N-tail(l$res,1)[,c("Sus")]-tail(l$res,1)[,c("Imp")], 
@@ -157,7 +161,7 @@ server <- function(input, output,clientData, session) {
                  Q=tail(l$res,1)[,c("all.Q")],
                  MaxI=max(l$res[,"Inf"])
                  )
-            #})
+            })
           }
           
           res2=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
@@ -170,7 +174,7 @@ server <- function(input, output,clientData, session) {
               x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
               l=run.pop( N,x,max.T= duration, infect.rate = input$inf.rate/1e5, test.cutoff=as.numeric(input$test.cutoff),
                          mass.test.every = test.freq, test.every = 200,
-                         par=list(beta = 1.6/ total.inf) # actual number is R0 divided by expected number of infections.
+                         par=list(beta = R0s[2]/ total.inf) # actual number is R0 divided by expected number of infections.
               )
               c( N=N, 
                  Infect=N-tail(l$res,1)[,c("Sus")]-tail(l$res,1)[,c("Imp")], 
@@ -191,7 +195,7 @@ server <- function(input, output,clientData, session) {
               x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
               l=run.pop( N,x,max.T= duration, infect.rate = input$inf.rate/1e5, test.cutoff=as.numeric(input$test.cutoff),
                          mass.test.every = test.freq, test.every = 200,
-                         par=list(beta = 4/ total.inf) # actual number is R0 divided by expected number of infections.
+                         par=list(beta = R0s[3]/ total.inf) # actual number is R0 divided by expected number of infections.
               )
               c( N=N, 
                  Infect=N-tail(l$res,1)[,c("Sus")]-tail(l$res,1)[,c("Imp")], 
@@ -201,8 +205,6 @@ server <- function(input, output,clientData, session) {
               )
             })
           }
-          
- #           stopCluster(clM)
             res1.m=Reduce(rbind,res1) 
             res2.m=Reduce(rbind,res2) 
             res3.m=Reduce(rbind,res3) 
@@ -211,51 +213,62 @@ server <- function(input, output,clientData, session) {
             x1   = res[,"Infect",] / res[,"Imp",]
             x2   = res[,"Q",]/(res[,"Infect",]+res[,"Imp",])
             x3 = (res[,"Infect",]+res[,"Imp",])/res[,"N",]
-            
+
             res2=abind( res, IIrat=x1, Qrat=x2,InfRat=x3,along=2 )
-            
-            
-            
+
+
+
             print(Sys.time()-tt)
-            apply(res2,c(2,3),median)
-        # } )
+            apply(res2,c(2,3),median,na.rm=T)
+            
         })  # lapply test.freqs
         res= res %>% abind(along=3) %>% aperm(perm = c(3,1,2))
         dimnames(res)[[1]]=test.freqs
         res.list[[par.s]] <<- res
         save(res.list,file="res_list.Rda")
-    }
+        }
+        
       res.list[[par.s]]
     })
     output$distPlot <- renderPlot({
 
     })
     output$plot2 = renderPlot( height=1024,width=1024,res=150,{
+    # browser()
       res=res.mass()
-
+#      res=aperm(res,c(1,3,2))
       test.freqs = dimnames(res)[[1]] %>% as.numeric()
       layout(cbind(1:2,3:4))
-      plot(test.freqs,res[,"hi","Infect"]/res[,"hi","Imp"],type="l",ylab="In school infections per imported case",xlab="days between tests",log="x",xaxt="n")
+#      plot(test.freqs,res[,"hi","Infect"]/res[,"hi","Imp"],type="l",ylab="In school infections per imported case",xlab="days between tests",log="x",xaxt="n")
+      plot(test.freqs,res[,"IIrat", "hi"],type="l",ylab="In school infections per imported case",xlab="days between tests",log="x",xaxt="n")
       axis(1,test.freqs)
-      lines(test.freqs,res[,"lo","Infect"]/res[,"lo","Imp"],col=2)
-      lines(test.freqs,res[,"med","Infect"]/res[,"med","Imp"],col=3)
-      legend("topleft",legend = c("Israel R0=4","Ireland R0=1.6","Germany R0=0.5"),lty=1,col=c(1,3,2))
+      lines(test.freqs,res[,"IIrat", "med"],col=2)
+      lines(test.freqs,res[,"IIrat", "lo"],col=3)
+#      lines(test.freqs,res[,"med","Infect"]/res[,"med","Imp"],col=2)
+#      lines(test.freqs,res[,"lo","Infect"]/res[,"lo","Imp"],col=3)
+      legend("topleft",legend = c("Israel R0=4","Ireland R0=1.6","Germany R0=0.5"),lty=1,col=c(1,2,3))
       
-      plot(test.freqs,res[,"hi","Q"]/(res[,"hi","Infect"]+res[,"hi","Imp"])*100,type="l",ylab="Percent cases caught",xlab="days between tests",xaxt="n",log="x",ylim=c(0,100))
+#      plot(test.freqs,res[,"hi","Q"]/(res[,"hi","Infect"]+res[,"hi","Imp"])*100,type="l",ylab="Percent cases caught",xlab="days between tests",xaxt="n",log="x",ylim=c(0,100))
+      plot(test.freqs,res[,"Qrat", "hi"]*100,type="l",ylab="Percent cases caught",xlab="days between tests",xaxt="n",log="x",ylim=c(0,100))
       axis(1,test.freqs)
-      lines(test.freqs,res[,"lo","Q"]/(res[,"lo","Infect"]+res[,"lo","Imp"])*100,col=2)
-      lines(test.freqs,res[,"med","Q"]/(res[,"med","Infect"]+res[,"med","Imp"])*100,col=3)
+      lines(test.freqs,res[,"Qrat", "med"]*100,col=2)
+      lines(test.freqs,res[,"Qrat", "lo"]*100,col=3)
+#      lines(test.freqs,res[,"med","Q"]/(res[,"med","Infect"]+res[,"med","Imp"])*100,col=2)
+#      lines(test.freqs,res[,"lo","Q"]/(res[,"lo","Infect"]+res[,"lo","Imp"])*100,col=3)
       
       
-      plot(test.freqs,res[,"hi","MaxI"],type="l",ylab="Maximal infected at once",xlab="days between tests",xaxt="n",log="x")
+      plot(test.freqs,res[,"MaxI","hi"],type="l",ylab="Maximal infected at once",xlab="days between tests",xaxt="n",log="x")
       axis(1,test.freqs)
-      lines(test.freqs,res[,"lo","MaxI"],col=2)
-      lines(test.freqs,res[,"med","MaxI"],col=3)
+      lines(test.freqs,res[,"MaxI","med"],col=2)
+      lines(test.freqs,res[, "MaxI","lo"],col=3)
       
-      plot(test.freqs,(res[,"hi","Infect"]+res[,"hi","Imp"])/res[,"hi","N"]*100,type="l",ylab="Percent infected",xlab="days between tests",xaxt="n",log="x",ylim=c(0,100))
+#      plot(test.freqs,(res[,"hi","Infect"]+res[,"hi","Imp"])/res[,"hi","N"]*100,type="l",ylab="Percent infected",xlab="days between tests",xaxt="n",log="x",ylim=c(0,100))
+      plot(test.freqs, res[,"InfRat","hi"]*100,type="l",ylab="Percent infected",xlab="days between tests",xaxt="n",log="x",ylim=c(0,100))
       axis(1,test.freqs)
-      lines(test.freqs,(res[,"lo","Infect"]+res[,"lo","Imp"])/res[,"lo","N"]*100,type="l",col=2)
-      lines(test.freqs,(res[,"med","Infect"]+res[,"med","Imp"])/res[,"med","N"]*100,type="l",col=3)
+      lines(test.freqs, res[,"InfRat","med"]*100,type="l",col=2)
+      lines(test.freqs, res[,"InfRat","lo"]*100,type="l",col=3)
+#      lines(test.freqs, (res[,"med","Infect"]+res[,"med","Imp"])/res[,"med","N"]*100,type="l",col=2)
+#      lines(test.freqs, (res[,"lo","Infect"]+res[,"lo","Imp"])/res[,"lo","N"]*100,type="l",col=3)
     })
 }
 
