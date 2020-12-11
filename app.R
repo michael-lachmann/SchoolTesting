@@ -8,6 +8,7 @@
 #
 
 library(shiny)
+library(shinyWidgets)
 library(magrittr)
 library(ggplot2)
 library(gridExtra)
@@ -38,7 +39,7 @@ makeCluster.conditional=function( cl, no_cores = detectCores(logical = TRUE)-1) 
 }
 
 #cl = makeCluster.conditional( cl)
-if( F ) {
+if( T ) {
 cl = makeCluster(3)
 registerDoParallel(cl)
 }
@@ -54,11 +55,18 @@ ui <- fluidPage(
     # Sidebar with a slider input for number of bins
     sidebarLayout(
         sidebarPanel(
-            sliderInput("school.size",
-                        "School size:",
-                        min = 1,
-                        max = 5000,
-                        value = 2300),
+          sliderTextInput("school.size","School size:", 
+                  choices = c(25,50,100,500,2000,5000), 
+                  animate = FALSE, grid = T, 
+                  hide_min_max = FALSE, from_fixed = FALSE,
+                  to_fixed = FALSE, from_min = NULL, from_max = NULL, to_min = NULL,
+                  to_max = NULL, force_edges = FALSE, width = NULL, pre = NULL, 
+                  post = NULL, dragRange = TRUE),
+            # sliderInput("school.size",
+            #             "School size:",
+            #             min = 1,
+            #             max = 5000,
+            #             value = 2300),
             sliderInput("inf.rate",
                         "Infection import rate per 100k:",
                         min=1, max=400,value=100),
@@ -95,14 +103,20 @@ ui <- fluidPage(
 )
 
 
+
+
+if( file.exists("res_list.Rda") & ( max(file.mtime("SchoolSim.R"),file.mtime("app.R"))<file.mtime("res_list.Rda") )  ) {load("res_list.Rda")} else {
+res.list=list()
+}
 input=list(school.size=2000,test.freq=30, threshold=100, R0=1.5, inf.rate=20/2500*1e5/14, duration=90, school.size=200,symp.p=0.3)
 
 # Define server logic required to draw a histogram
 server <- function(input, output,clientData, session) {
     res.mass = reactive({
+      
         n.days = 18
         n.types= 10
-        N=input$school.size
+        N=as.numeric(input$school.size)
         x= setup.pop( n.days= n.days, n.types= n.types,symp.p = as.numeric(input$symp.p) )
         # How many infections will single individual produce?
         sum.inf = mean(colSums(x$inf[,x$inf.types])) # infection factor over days
@@ -119,16 +133,19 @@ server <- function(input, output,clientData, session) {
 #          clM<<-makeCluster(7)  
 #          print("register")
 #          registerDoParallel(clM)
+        par.s=paste( input$school.size, input$test.cutoff, input$inf.rate)
+        if( !(par.s %in% names(res.list)) ) {
         res=lapply( test.freqs, function(test.freq) {
           tt=Sys.time()
-          N.runs=30
+          N.runs=100
           res=sum( input$test.freq,  input$inf.rate, duration, as.numeric(input$test.cutoff)) # This is just so things recalculate
           res1=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
-                       .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress"),
+                       .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress","N",
+                                   "n.types","x","duration","total.inf"),
                        .packages = c("magrittr","roperators"),
                        .inorder=F
                       ) %do% {
-            isolate({
+            #isolate({
               x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
               l=run.pop( N,x,max.T= duration, infect.rate = input$inf.rate/1e5, test.cutoff=as.numeric(input$test.cutoff),
                          mass.test.every = test.freq, test.every = 200,
@@ -140,11 +157,12 @@ server <- function(input, output,clientData, session) {
                  Q=tail(l$res,1)[,c("all.Q")],
                  MaxI=max(l$res[,"Inf"])
                  )
-            })
+            #})
           }
           
           res2=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
-                       .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress"),
+                        .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress","N",
+                                    "n.types","x","duration","total.inf"),
                        .packages = c("magrittr","roperators"),
                        .inorder=F
           ) %do% {
@@ -164,7 +182,8 @@ server <- function(input, output,clientData, session) {
           }
           
           res3=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
-                       .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress"),
+                        .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress","N",
+                                    "n.types","x","duration","total.inf"),
                        .packages = c("magrittr","roperators"),
                        .inorder=F
           ) %do% {
@@ -184,58 +203,36 @@ server <- function(input, output,clientData, session) {
           }
           
  #           stopCluster(clM)
-            res1.m=Reduce(rbind,res1) %>% as.data.frame %>% {apply(.,2,median)}
-            res2.m=Reduce(rbind,res2) %>% as.data.frame %>% {apply(.,2,median)}
-            res3.m=Reduce(rbind,res3) %>% as.data.frame %>% {apply(.,2,median)}
+            res1.m=Reduce(rbind,res1) 
+            res2.m=Reduce(rbind,res2) 
+            res3.m=Reduce(rbind,res3) 
+            res=abind( lo=res1.m,med=res2.m,hi=res3.m,along=3)
+            
+            x1   = res[,"Infect",] / res[,"Imp",]
+            x2   = res[,"Q",]/(res[,"Infect",]+res[,"Imp",])
+            x3 = (res[,"Infect",]+res[,"Imp",])/res[,"N",]
+            
+            res2=abind( res, IIrat=x1, Qrat=x2,InfRat=x3,along=2 )
+            
+            
+            
             print(Sys.time()-tt)
-            rbind( lo=res1.m,med=res2.m,hi=res3.m)
+            apply(res2,c(2,3),median)
         # } )
         })  # lapply test.freqs
-        res %<>% abind(along=3) %>% aperm(perm = c(3,1,2))
+        res= res %>% abind(along=3) %>% aperm(perm = c(3,1,2))
         dimnames(res)[[1]]=test.freqs
-        res
+        res.list[[par.s]] <<- res
+        save(res.list,file="res_list.Rda")
+    }
+      res.list[[par.s]]
     })
     output$distPlot <- renderPlot({
 
     })
     output$plot2 = renderPlot( height=1024,width=1024,res=150,{
       res=res.mass()
-      # df.lo = melt(res$lo)
-      # df.med = melt(res$med)
-      # df.hi = melt(res$hi)
-      # x.lo= df.lo %>% filter(variable=="Infect" | variable=="Imp")
-      # x.med = df.med %>% filter(variable=="Infect" | variable=="Imp")
-      # x.hi = df.hi %>% filter(variable=="Infect" | variable=="Imp")
-      # 
-      # x.max=max( x.lo$value, x.med$value, x.hi$value )
-      # 
-      # bin = min( floor(x.max/10)+1, 5)
-      # 
-      # g.lo = ggplot( df.lo %>% filter(variable=="Infect" | variable=="Imp"), aes(x=value,fill=variable)) + 
-      #   labs( title= "Frequency of number infected, low spread")+
-      #   ylab("Percentage of schools") +
-      #   xlab("number infected") +
-      #   coord_cartesian( xlim=c(0,x.max) ) +
-      #   scale_fill_discrete(labels=c("Transmission in school","Imported infections")) +
-      #   geom_histogram( aes(y=bin*..density..*100),binwidth=bin,position = "identity",alpha=0.5)+
-      #   labs(fill = "Type of transmission")
-      # g.med = ggplot( df.med %>% filter(variable=="Infect" | variable=="Imp"), aes(x=value,fill=variable)) + 
-      #   labs( title= "Frequency of number infected, medium spread")+
-      #   xlab("number infected") +
-      #   ylab("Percentage of schools") +
-      #   coord_cartesian( xlim=c(0,x.max) ) +
-      #   scale_fill_discrete(labels=c("Transmission in school","Imported infections")) +
-      #   geom_histogram( aes(y=bin*..density..*100),binwidth=bin,position = "identity",alpha=0.5) +
-      #   labs(fill = "Type of transmission")
-      # g.hi = ggplot( df.hi %>% filter(variable=="Infect" | variable=="Imp"), aes(x=value,fill=variable)) + 
-      #   labs( title= "Frequency of number infected, high spread")+
-      #   xlab("number infected") +
-      #   ylab("Percentage of schools") +
-      #   coord_cartesian( xlim=c(0,x.max) ) +
-      #   scale_fill_discrete(labels=c("Transmission in school","Imported infections")) +
-      #   geom_histogram( aes(y=bin*..density..*100),binwidth=bin,position = "identity",alpha=0.5) +
-      #   labs(fill = "Type of transmission")
-      #grid.arrange(g.lo,g.med,g.hi,nrow=3)
+
       test.freqs = dimnames(res)[[1]] %>% as.numeric()
       layout(cbind(1:2,3:4))
       plot(test.freqs,res[,"hi","Infect"]/res[,"hi","Imp"],type="l",ylab="In school infections per imported case",xlab="days between tests",log="x",xaxt="n")
