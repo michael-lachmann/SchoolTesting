@@ -115,120 +115,13 @@ input=list(school.size=2000,test.freq=30, threshold=100, R0=1.5, inf.rate=20/250
 # Define server logic required to draw a histogram
 server <- function(input, output,clientData, session) {
     res.mass = reactive({
-      
-        n.days = 18
-        n.types= 10
-        N=as.numeric(input$school.size)
-        x= setup.pop( n.days= n.days, n.types= n.types,symp.p = as.numeric(input$symp.p) )
-        # How many infections will single individual produce?
-        sum.inf = mean(colSums(x$inf[,x$inf.types])) # infection factor over days
-        total.inf = N * sum.inf      # interaction with all kids in school
-      
-        test.freqs=c(2,3,7,14,30,90)
-        R0s = c(0.6,1.6,4)
-        
-        duration=90
-        
-        ###### NEED TO INITIALIZE SCHOOL FOR EACH RUN
-        # 
-        # withProgress(message = 'Making plot', value = 0, {
-        #     setProgress( 0)
-#          clM<<-makeCluster(7)  
-#          print("register")
-#          registerDoParallel(clM)
-        par.s=paste( input$school.size, input$test.cutoff, input$inf.rate,input$symp.p)
-#        if(T) {
-        if( !(par.s %in% names(res.list)) ) {
-        res=lapply( test.freqs, function(test.freq) {
-          tt=Sys.time()
-          N.runs=30
-          res=sum( input$test.freq,  input$inf.rate, duration, as.numeric(input$test.cutoff), as.numeric(input$symp.p)) # This is just so things recalculate
-          res1=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
-                       .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress","N",
-                                   "n.types","x","duration","total.inf"),
-                       .packages = c("magrittr","roperators"),
-                       .inorder=F
-                      ) %do% {
-            isolate({
-              x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
-              l=run.pop( N,x,max.T= duration, infect.rate = input$inf.rate/1e5, test.cutoff=as.numeric(input$test.cutoff),
-                         mass.test.every = test.freq, test.every = 200,
-                         par=list(beta = R0s[1]/ total.inf) # actual number is R0 divided by expected number of infections.
-                         )
-              c( N=N, 
-                 Infect=N-tail(l$res,1)[,c("Sus")]-tail(l$res,1)[,c("Imp")], 
-                 Imp=tail(l$res,1)[,c("Imp")], 
-                 Q=tail(l$res,1)[,c("all.Q")],
-                 MaxI=max(l$res[,"Inf"])
-                 )
-            })
-          }
-          
-          res2=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
-                        .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress","N",
-                                    "n.types","x","duration","total.inf"),
-                       .packages = c("magrittr","roperators"),
-                       .inorder=F
-          ) %do% {
-            isolate({
-              x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
-              l=run.pop( N,x,max.T= duration, infect.rate = input$inf.rate/1e5, test.cutoff=as.numeric(input$test.cutoff),
-                         mass.test.every = test.freq, test.every = 200,
-                         par=list(beta = R0s[2]/ total.inf) # actual number is R0 divided by expected number of infections.
-              )
-              c( N=N, 
-                 Infect=N-tail(l$res,1)[,c("Sus")]-tail(l$res,1)[,c("Imp")], 
-                 Imp=tail(l$res,1)[,c("Imp")], 
-                 Q=tail(l$res,1)[,c("all.Q")],
-                 MaxI=max(l$res[,"Inf"])
-              )
-            })
-          }
-          
-          res3=foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
-                        .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress","N",
-                                    "n.types","x","duration","total.inf"),
-                       .packages = c("magrittr","roperators"),
-                       .inorder=F
-          ) %do% {
-            isolate({
-              x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
-              l=run.pop( N,x,max.T= duration, infect.rate = input$inf.rate/1e5, test.cutoff=as.numeric(input$test.cutoff),
-                         mass.test.every = test.freq, test.every = 200,
-                         par=list(beta = R0s[3]/ total.inf) # actual number is R0 divided by expected number of infections.
-              )
-              c( N=N, 
-                 Infect=N-tail(l$res,1)[,c("Sus")]-tail(l$res,1)[,c("Imp")], 
-                 Imp=tail(l$res,1)[,c("Imp")], 
-                 Q=tail(l$res,1)[,c("all.Q")],
-                 MaxI=max(l$res[,"Inf"])
-              )
-            })
-          }
-            res1.m=Reduce(rbind,res1) 
-            res2.m=Reduce(rbind,res2) 
-            res3.m=Reduce(rbind,res3) 
-            res=abind( lo=res1.m,med=res2.m,hi=res3.m,along=3)
+      # par.s=paste( input$school.size, input$test.cutoff, input$inf.rate,input$symp.p)
+#      res=sum( input$test.freq,  input$inf.rate, duration, as.numeric(input$test.cutoff), as.numeric(input$symp.p)) # This is just so things recalculate
+      # res.list[[par.s]] <<- res
+      # save(res.list,file="res_list.Rda")
+
+      run.schools()
             
-            x1   = res[,"Infect",] / res[,"Imp",]
-            x2   = res[,"Q",]/(res[,"Infect",]+res[,"Imp",])
-            x3 = (res[,"Infect",]+res[,"Imp",])/res[,"N",]
-
-            res2=abind( res, IIrat=x1, Qrat=x2,InfRat=x3,along=2 )
-
-
-
-            print(Sys.time()-tt)
-            apply(res2,c(2,3),median,na.rm=T)
-            
-        })  # lapply test.freqs
-        res= res %>% abind(along=3) %>% aperm(perm = c(3,1,2))
-        dimnames(res)[[1]]=test.freqs
-        res.list[[par.s]] <<- res
-        save(res.list,file="res_list.Rda")
-        }
-        
-      res.list[[par.s]]
     })
     output$distPlot <- renderPlot({
 

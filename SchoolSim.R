@@ -241,6 +241,71 @@ check.R0 = function( N, R0, n.days=18, n.type=20) {
 }
 
   
+
+
+run.schools=function( 
+    n.days = 18,
+    n.types= 10,
+    school.size=2000,
+    inf.rate=100/1e5,
+    test.cutoff=3,
+    symp.p=0.3,
+    test.freqs=c(2,3,7,14,30,90),
+    R0s = c(0.6,1.6,4),
+    duration=90,
+    N.runs=30
+  ) {
+  N= school.size
+  x= setup.pop( n.days= n.days, n.types= n.types,symp.p = symp.p )
+  
+  # How many infections will single individual produce?
+  sum.inf = mean(colSums(x$inf[,x$inf.types])) # infection factor over days
+  total.inf = N * sum.inf      # interaction with all kids in school
+
+  ###### NEED TO INITIALIZE SCHOOL FOR EACH RUN
+  # 
+  # withProgress(message = 'Making plot', value = 0, {
+  #     setProgress( 0)
+  #          clM<<-makeCluster(7)  
+  #          print("register")
+  #          registerDoParallel(clM)
+  #        if(T) {
+  res=lapply( test.freqs, function(test.freq) {
+    res=lapply( R0s, function(R0) {
+      foreach( i=seq_len(N.runs), #.combine = cbind, .multicombine=T,
+                    .export = c("run.pop","infect.pop","next.gen","test.pop","input","isolate","incProgress","N",
+                                "n.types","x","duration","total.inf"),
+                    .packages = c("magrittr","roperators"),
+                    .inorder=F
+      ) %do% {
+          x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
+          l=run.pop( N,x,max.T= duration, infect.rate = inf.rate, test.cutoff=test.cutoff,
+                     mass.test.every = test.freq, test.every = 200,
+                     par=list(beta = R0/ total.inf) # actual number is R0 divided by expected number of infections.
+          )
+          c( N=N, 
+             Infect=N-tail(l$res,1)[,c("Sus")]-tail(l$res,1)[,c("Imp")], 
+             Imp=tail(l$res,1)[,c("Imp")], 
+             Q=tail(l$res,1)[,c("all.Q")],
+             MaxI=max(l$res[,"Inf"])
+          )
+      }
+    }) %>%
+      lapply( FUN= function(x) Reduce(rbind,x) ) %>%  
+      abind(  along=3)
+    
+    x1   = res[,"Infect",] / res[,"Imp",]
+    x2   = res[,"Q",]/(res[,"Infect",]+res[,"Imp",])
+    x3 = (res[,"Infect",]+res[,"Imp",])/res[,"N",]
+    
+    res2=abind( res, IIrat=x1, Qrat=x2,InfRat=x3,along=2 )
+    apply(res2,c(2,3),median,na.rm=T)
+    
+  })  # lapply test.freqs
+  res= res %>% abind(along=3) %>% aperm(perm = c(3,1,2))
+  dimnames(res)[[1]]=test.freqs
+  res
+}
   
   
 # 
