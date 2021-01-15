@@ -115,20 +115,29 @@ input=list(school.size=2000,test.freq=30, threshold=100, R0=1.5, inf.rate=20/250
 # Define server logic required to draw a histogram
 server <- function(input, output,clientData, session) {
     res.mass = reactive({
-      # par.s=paste( input$school.size, input$test.cutoff, input$inf.rate,input$symp.p)
-#      res=sum( input$test.freq,  input$inf.rate, duration, as.numeric(input$test.cutoff), as.numeric(input$symp.p)) # This is just so things recalculate
-      # res.list[[par.s]] <<- res
-      # save(res.list,file="res_list.Rda")
-
-      run.schools()
+      par.s=paste( input$school.size, input$test.cutoff, input$inf.rate, input$symp.p)
+      if( !is.null(res.list[[par.s]])) {
+        res = res.list[[par.s]]
+      } else {
+   #     browser()
+  #    res=sum( input$test.freq,  input$inf.rate,  as.numeric(input$test.cutoff), as.numeric(input$symp.p)) # This is just so things recalculate
+      res=run.schools( school.size = as.numeric(input$school.size),
+                       test.cutoff = as.numeric(input$test.cutoff),
+                       inf.rate = as.numeric(input$inf.rate)/1e5,
+                       symp.p = as.numeric(input$symp.p) )
+      
+      res.list[[par.s]] <<- res
+       save(res.list,file="res_list.Rda")
+      }
+    res
             
     })
     output$distPlot <- renderPlot({
 
     })
     output$plot2 = renderPlot( height=1024,width=1024,res=150,{
-    # browser()
       res=res.mass()
+      dimnames(res)[[3]]=c("hi","med","lo")
 #      res=aperm(res,c(1,3,2))
       test.freqs = dimnames(res)[[1]] %>% as.numeric()
       layout(cbind(1:2,3:4))
