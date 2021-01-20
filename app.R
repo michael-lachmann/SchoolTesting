@@ -74,12 +74,12 @@ ui <- fluidPage(
 #            sliderInput("duration",
 #                        "Number of days (including weekend):",
 #                        min=1, max=150, value=90),
-#            sliderInput("test.freq",
-#                        "Test frequency:",
-#                        min=2, max=90,value=30),
-            # sliderInput("R0",
-            #             "R0:",
-            #             min=0, max=5,value=1.6,step=0.1),
+            sliderInput("test.freq",
+                        "Test every:",
+                        min=2, max=90,value=30),
+             sliderInput("R0",
+                         "R0:",
+                         min=0, max=5,value=1.6,step=0.1),
             radioButtons("test.cutoff",label="Test type",inline=T,
                           choices=c(
                             "PCR"=3,
@@ -132,15 +132,30 @@ server <- function(input, output,clientData, session) {
     res
             
     })
+    
+    res.single = reactive({
+        res=run.single.school( school.size = as.numeric(input$school.size),
+                         test.cutoff = as.numeric(input$test.cutoff),
+                         inf.rate = as.numeric(input$inf.rate)/1e5,
+                         R0= as.numeric(input$R0),
+                         test.freq = as.numeric( input$test.freq ),
+                         symp.p = as.numeric(input$symp.p) )
+        
+      
+      res
+      
+    })
+    
     output$distPlot <- renderPlot({
 
     })
-    output$plot2 = renderPlot( height=1024,width=1024,res=150,{
+    output$plot2 = renderPlot( height=1024,width=1024,res=70,{
       res=res.mass()
       dimnames(res)[[3]]=c("hi","med","lo")
 #      res=aperm(res,c(1,3,2))
       test.freqs = dimnames(res)[[1]] %>% as.numeric()
-      layout(cbind(1:2,3:4))
+      
+      layout(cbind( c(1:2,5,5),c(3:4,5,5)))
 #      plot(test.freqs,res[,"hi","Infect"]/res[,"hi","Imp"],type="l",ylab="In school infections per imported case",xlab="days between tests",log="x",xaxt="n")
       plot(test.freqs,res[,"IIrat", "hi"],type="l",ylab="In school infections per imported case",xlab="days between tests",log="x",xaxt="n")
       axis(1,test.freqs)
@@ -171,6 +186,15 @@ server <- function(input, output,clientData, session) {
       lines(test.freqs, res[,"InfRat","lo"]*100,type="l",col=3)
 #      lines(test.freqs, (res[,"med","Infect"]+res[,"med","Imp"])/res[,"med","N"]*100,type="l",col=2)
 #      lines(test.freqs, (res[,"lo","Infect"]+res[,"lo","Imp"])/res[,"lo","N"]*100,type="l",col=3)
+
+      l=res.single()
+      
+      N=as.numeric(input$school.size)
+      T=90
+      plot( 1:90, N - l$res[,"Sus"],type="l")
+      rect( 1:T-1, 0,                 1:T-0.2, l$res[,"new.Imp"]                   ,col="red")
+      rect( 1:T-1, l$res[,"new.Imp"] ,1:T-0.2, l$res[,"new.Imp"]+l$res[,"new.Inf"]           )
+      
     })
 }
 

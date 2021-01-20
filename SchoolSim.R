@@ -1,13 +1,11 @@
 library(roperators)
+library(magrittr)
 
 # next.gen does 
 # 1. disease progression
 # 2. transmission
 next.gen=function( x, do.infect=T ) {
-  gamma=1
-  pop1=x$pop
 
-  
   n.types = length( x$inf.types )
   n.days  = length( x$inf.days )
   
@@ -26,7 +24,7 @@ next.gen=function( x, do.infect=T ) {
   if( do.infect) {
     x=infect.pop( x, 1- exp( log(1-sI)) )
   }
-  x$pop
+  x
 }
 
 
@@ -71,10 +69,12 @@ test.pop=function( x, det, cutoff, freq, false.pos=0.00) {
 }
 
 
+# Do advance pop a certain number of generations, doings tests, quarantine, etc
+
 run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14, 
                    mass.test.fract=1, test.every=100, close.thresh=1e6, symp.thresh=0.5, use.weekend = T, test.cutoff=3,
                    par=list(beta=0.)) {
-  res     =matrix( 0, max.T, 6 ) # record results
+  res     =matrix( 0, max.T, 8 ) # record results
   n.days  = length(x$inf.days)
   n.types = length(x$inf.types)
   x$inf = x$inf * par$beta
@@ -94,10 +94,15 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
     else
       weekend = T
     
+    
+    x$new.infect=0
     x = infect.pop( x, infect.rate )
     x$N.import %+=% x$new.infect
+    new.imp = x$new.infect
     
-    x$pop[] = next.gen( x, do.infect = !weekend )
+    x$new.infect=0
+    x = next.gen( x, do.infect = !weekend )
+    new.inf = x$new.infect
     
     
     
@@ -118,7 +123,10 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
                     sum( x$pop[ x$inf.days, "Q"]),
                     sum( x$pop[ "S"         , -m]),
                     sum( x$pop[             , "Q"]),
-                    sum( x$pop[ "R"         , -m]))
+                    sum( x$pop[ "R"         , -m]),
+                    x$N.import,
+                    new.imp,
+                    new.inf)
         res=res[1:t,]
         break
       }
@@ -132,12 +140,16 @@ run.pop = function(N,x,max.T=200, infect.rate=1/1000, mass.test.every=14,
                 sum( x$pop[ "S"         , -m            ] ), # sus
                 sum( x$pop[             , "Q"           ] ), # all quaran
                 sum( x$pop[ "R"         , -m            ] ),  # recovered
-                x$N.import
+                x$N.import,
+                new.imp,
+                new.inf
                )
   }
-  colnames(res)=c("Inf","in.Q","Sus","all.Q","Rec","Imp")
+  colnames(res)=c("Inf","in.Q","Sus","all.Q","Rec","Imp","new.Imp","new.Inf")
   list( x=x, res=res)
 }
+
+
 
 viral.load=function(n,day.max, load.max) {
   day.max = min( day.max, n-1)
@@ -231,7 +243,7 @@ check.R0 = function( N, R0, n.days=18, n.type=20) {
     x$pop= pop0
     x$pop["I1","T1"]=1
   for( i in 1:n.days) {
-    x$pop = next.gen( x, do.infect = T )
+    x = next.gen( x, do.infect = T )
 #    x$pop["I1","Q"] = sum(x$pop["I1", x$inf.types])
 #    x$pop["I1", x$inf.types] = 0
   }
@@ -244,8 +256,8 @@ check.R0 = function( N, R0, n.days=18, n.type=20) {
 
 
 run.schools=function( 
-    n.days = 18,
-    n.types= 10,
+    n.days = 18,   # Number of days a single infection takes
+    n.types= 10,   # Types of infections
     school.size=2000,
     inf.rate=100/1e5,
     test.cutoff=3,
@@ -307,6 +319,33 @@ run.schools=function(
   res
 }
   
+
+
+run.single.school=function( 
+  n.days = 18,   # Number of days a single infection takes
+  n.types= 10,   # Types of infections
+  school.size=2000,
+  inf.rate=100/1e5,
+  test.cutoff=3,
+  symp.p=0.3,
+  test.freq=c(14),
+  R0 = c(1.6),
+  duration=90
+) {
+  N= school.size
+  x= setup.pop( n.days= n.days, n.types= n.types,symp.p = symp.p )
+  
+  # How many infections will single individual produce?
+  sum.inf = mean(colSums(x$inf[,x$inf.types])) # infection factor over days
+  total.inf = N * sum.inf      # interaction with all kids in school
+  
+  x$pop["S",  ] =c( 0, rmultinom( 1, N,rep( 1, n.types)), 0)
+  run.pop( N,x,max.T= duration, infect.rate = inf.rate, test.cutoff=test.cutoff,
+             mass.test.every = test.freq, test.every = 200,
+             par=list(beta = R0/ total.inf) # actual number is R0 divided by expected number of infections.
+  )
+}
+
   
 # 
 # 
